@@ -26,7 +26,25 @@ func (r *UserRepository) Create(user *entities.User) RepositoryResult {
 		return RepositoryResult{Error: err}
 	}
 	user.Password = string(fromPassword)
-	err = r.db.Create(user).Error
+	err = r.db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Create(user).Error
+		if err != nil {
+			return err
+		}
+		userRoles := make([]entities.SysRoleUser, len(user.RoleIds))
+		for _, roleId := range user.RoleIds {
+			record := entities.SysRoleUser{
+				RoleId: roleId,
+				UserId: user.ID,
+			}
+			userRoles = append(userRoles, record)
+		}
+		err = tx.Create(&userRoles).Error
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return RepositoryResult{Error: err}
 	}
@@ -43,9 +61,16 @@ func (r *UserRepository) Update(user *entities.User) RepositoryResult {
 }
 
 // FindOneById 通过主键ID查询一条记录
-func (r *UserRepository) FindOneById(id int64) RepositoryResult {
+func (r *UserRepository) FindOneById(id uint64) RepositoryResult {
 	var user entities.User
-	err := r.db.Where(&entities.User{Model: global.Model{ID: id}}).Take(&user).Error
+	condition := &entities.User{
+		BaseUser: entities.BaseUser{
+			Model: global.Model{
+				ID: id,
+			},
+		},
+	}
+	err := r.db.Where(condition).Take(&user).Error
 	if err != nil {
 		return RepositoryResult{Error: err}
 	}
@@ -63,8 +88,15 @@ func (r *UserRepository) FindAll() RepositoryResult {
 }
 
 // DeleteOneById 根据主键删除一条记录
-func (r *UserRepository) DeleteOneById(id int64) RepositoryResult {
-	err := r.db.Delete(&entities.User{Model: global.Model{ID: id}}).Error
+func (r *UserRepository) DeleteOneById(id uint64) RepositoryResult {
+	condition := &entities.User{
+		BaseUser: entities.BaseUser{
+			Model: global.Model{
+				ID: id,
+			},
+		},
+	}
+	err := r.db.Delete(condition).Error
 	if err != nil {
 		return RepositoryResult{Error: err}
 	}
@@ -77,7 +109,11 @@ func (r *UserRepository) FindOneByPhone(phone string) RepositoryResult {
 		return RepositoryResult{Error: errors.New("手机号不得为空")}
 	}
 	var user entities.User
-	err := r.db.Where(&entities.User{Phone: phone}).Take(&user).Error
+	err := r.db.Where(&entities.User{
+		BaseUser: entities.BaseUser{
+			Phone: phone,
+		},
+	}).Take(&user).Error
 	if err != nil {
 		return RepositoryResult{Error: err}
 	}
@@ -91,7 +127,7 @@ func (r *UserRepository) CheckPassword(hashPassword, password string) Repository
 }
 
 // Pagination 分页构造器
-func (r *UserRepository) Pagination(pagination *entities.UserServicePaginationReq) RepositoryResult {
+func (r *UserRepository) Pagination(pagination *entities.PageReq) RepositoryResult {
 	var (
 		users          []entities.User
 		totalRows      int64
@@ -128,12 +164,16 @@ func (r *UserRepository) Pagination(pagination *entities.UserServicePaginationRe
 		return RepositoryResult{Error: err}
 	}
 	// 总条目
-	pagination.Rows = users
 	err = query.Count(&totalRows).Error
 	if err != nil {
 		return RepositoryResult{Error: err}
 	}
 	// 总条目数量
 	pagination.Total = int(totalRows)
-	return RepositoryResult{Result: pagination}
+	// 返回结构
+	pageResult := entities.PageResult{
+		Pagination: pagination.Pagination,
+		List:       users,
+	}
+	return RepositoryResult{Result: pageResult}
 }

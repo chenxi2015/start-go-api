@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/voyager-go/start-go-api/config"
 	"github.com/voyager-go/start-go-api/entities"
@@ -19,7 +20,7 @@ type userService struct{}
 var User = userService{}
 
 // Create 创建一条记录
-func (s *userService) Create(req entities.UserServiceCreateReq) error {
+func (s *userService) Create(req *entities.UserServiceCreateReq) error {
 	var user entities.User
 	err := gconv.Struct(req, &user)
 	if err != nil {
@@ -55,16 +56,13 @@ func (s *userService) Update(req entities.UserServiceUpdateReq) error {
 }
 
 // FindOne 根据用户ID查找用户信息
-func (s *userService) FindOne(ID int64) (*entities.User, error) {
+func (s *userService) FindOne(ID uint64) (*entities.User, error) {
 	userRepository := repositories.NewUserRepository()
 	datum := userRepository.FindOneById(ID)
 	user, ok := datum.Result.(*entities.User)
 	if datum.Error != nil || !ok {
 		return nil, errors.New("该用户不存在")
 	}
-	layout := "2006-01-02 15:04:05"
-	user.FormatCreated = user.CreatedAt.Format(layout)
-	user.FormatUpdated = user.UpdatedAt.Format(layout)
 	return user, nil
 }
 
@@ -84,7 +82,18 @@ func (s *userService) Login(req entities.UserServiceTokenReq) (string, error) {
 	if err != nil {
 		return "", errors.New("token生成失败")
 	}
+	roleResult := repositories.NewSysRoleUserRepository().FindAllByUserId(user.ID)
+	if roleResult.Error != nil {
+		return "", roleResult.Error
+	}
+	roleInfo := roleResult.Result.([]entities.SysRoleUser)
+	if len(roleInfo) > 0 {
+		for _, role := range roleInfo {
+			user.RoleIds = append(user.RoleIds, role.RoleId)
+		}
+	}
 	marshal, err := json.Marshal(user)
+	fmt.Println(string(marshal))
 	if err != nil {
 		return "", errors.New("token编码失败")
 	}
